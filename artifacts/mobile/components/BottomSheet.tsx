@@ -21,10 +21,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ElevationProfile from "@/components/ElevationProfile";
+import ImportModal from "@/components/ImportModal";
 import RouteCard from "@/components/RouteCard";
 import SearchInput from "@/components/SearchInput";
 import { useRoute } from "@/context/RouteContext";
 import { useColors } from "@/hooks/useColors";
+import { ImportResult } from "@/services/googleMapsImport";
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
 const SHEET_HEIGHT = 660;
@@ -56,6 +58,7 @@ export default function BottomSheet() {
 
   const [sheetState, setSheetState] = useState<SheetState>("peek");
   const sheetStateRef = useRef<SheetState>("peek");
+  const [showImport, setShowImport] = useState(false);
 
   const translateY = useRef(new Animated.Value(MAX_Y)).current;
   const currentYRef = useRef(MAX_Y);
@@ -126,6 +129,12 @@ export default function BottomSheet() {
 
   const handleFindRoute = async () => {
     await searchRoutes();
+  };
+
+  const handleImportResult = (result: ImportResult) => {
+    if (result.origin) setOrigin(result.origin);
+    if (result.destination) setDestination(result.destination);
+    setShowImport(false);
   };
 
   const handleOpenGoogleMaps = () => {
@@ -221,6 +230,17 @@ export default function BottomSheet() {
             iconColor={colors.destructive}
           />
 
+          <TouchableOpacity
+            style={styles.importLink}
+            onPress={() => setShowImport(true)}
+            activeOpacity={0.7}
+          >
+            <Feather name="download" size={14} color={colors.primary} />
+            <Text style={[styles.importLinkText, { color: colors.primary }]}>
+              Import from Google Maps
+            </Text>
+          </TouchableOpacity>
+
           {error && (
             <Text style={[styles.errorText, { color: colors.destructive }]}>
               {error}
@@ -309,6 +329,11 @@ export default function BottomSheet() {
           </View>
         </ScrollView>
       )}
+      <ImportModal
+        visible={showImport}
+        onClose={() => setShowImport(false)}
+        onImport={handleImportResult}
+      />
     </Animated.View>
   );
 }
@@ -382,6 +407,17 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
+  },
+  importLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 4,
+  },
+  importLinkText: {
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
   },
   errorText: {
     fontSize: 13,
