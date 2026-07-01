@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from "react";
-import { StyleSheet, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from "react-native";
 import { useRoute } from "@/context/RouteContext";
+import { reverseGeocode } from "@/services/geocoding";
 
 const MAP_ID = "walkable-leaflet-map";
 
@@ -31,11 +32,13 @@ function loadLeaflet(onReady: () => void) {
 }
 
 export default function MapContainer() {
-  const { origin, destination, routes, selectedRouteId } = useRoute();
+  const { origin, destination, routes, selectedRouteId, setOrigin } = useRoute();
+  const [locating, setLocating] = useState(false);
 
   const mapInstanceRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
   const polylinesRef = useRef<any[]>([]);
+  const userDotRef = useRef<any>(null);
   const readyRef = useRef(false);
 
   useEffect(() => {
@@ -50,7 +53,8 @@ export default function MapContainer() {
       );
 
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors",
+        attribution:
+          "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors",
         maxZoom: 19,
       }).addTo(map);
 
@@ -145,7 +149,7 @@ export default function MapContainer() {
           { padding: [60, 60] },
         );
       } else if (origin) {
-        map.setView([origin.latitude, origin.longitude], 14);
+        map.setView([origin.latitude, origin.longitude], 15);
       }
 
       setTimeout(() => map.invalidateSize(), 50);
@@ -164,9 +168,82 @@ export default function MapContainer() {
     }
   }, [routes, selectedRouteId, origin, destination]);
 
+  const handleLocateMe = () => {
+    if (!navigator.geolocation) return;
+    setLocating(true);
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+
+        const map = mapInstanceRef.current;
+        const L = (window as any).L;
+
+        if (map) {
+          map.flyTo([latitude, longitude], 15, { duration: 1.2 });
+
+          if (userDotRef.current) userDotRef.current.remove();
+          userDotRef.current = L.circleMarker([latitude, longitude], {
+            radius: 8,
+            color: "#fff",
+            fillColor: "#2563EB",
+            fillOpacity: 1,
+            weight: 3,
+          })
+            .bindPopup("You are here")
+            .addTo(map);
+        }
+
+        try {
+          const loc = await reverseGeocode(latitude, longitude);
+          setOrigin(loc);
+        } catch {
+          setOrigin({
+            id: `${latitude},${longitude}`,
+            name: "My Location",
+            displayName: "My Location",
+            latitude,
+            longitude,
+          });
+        } finally {
+          setLocating(false);
+        }
+      },
+      () => {
+        setLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  };
+
   return (
     <View style={styles.container}>
       <View nativeID={MAP_ID} style={styles.map} />
+
+      <TouchableOpacity
+        style={styles.locateButton}
+        onPress={handleLocateMe}
+        activeOpacity={0.85}
+        disabled={locating}
+      >
+        {locating ? (
+          <ActivityIndicator size="small" color="#1B6B3A" />
+        ) : (
+          <LocateIcon />
+        )}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function LocateIcon() {
+  return (
+    <View style={styles.iconWrap}>
+      <View style={styles.iconOuter}>
+        <View style={styles.iconInner} />
+      </View>
+      <View style={styles.iconCrosshairH} />
+      <View style={styles.iconCrosshairV} />
     </View>
   );
 }
@@ -180,4 +257,56 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   } as any,
+  locateButton: {
+    position: "absolute",
+    right: 14,
+    bottom: 130,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    elevation: 5,
+    zIndex: 10,
+  },
+  iconWrap: {
+    width: 22,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconOuter: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: "#1B6B3A",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconInner: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: "#1B6B3A",
+  },
+  iconCrosshairH: {
+    position: "absolute",
+    width: 22,
+    height: 2,
+    backgroundColor: "#1B6B3A",
+    borderRadius: 1,
+  },
+  iconCrosshairV: {
+    position: "absolute",
+    width: 2,
+    height: 22,
+    backgroundColor: "#1B6B3A",
+    borderRadius: 1,
+  },
 });
