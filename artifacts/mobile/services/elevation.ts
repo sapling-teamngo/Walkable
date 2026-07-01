@@ -5,7 +5,7 @@ export interface ElevationData {
   maxGrade: number;
 }
 
-const TOPO_BASE = "https://api.opentopodata.org/v1/srtm90m";
+const OPEN_ELEVATION_URL = "https://api.open-elevation.com/api/v1/lookup";
 
 function sampleCoordinates<T extends { latitude: number; longitude: number }>(
   coords: T[],
@@ -41,50 +41,55 @@ function computeElevationStats(
   };
 }
 
+async function fetchElevations(
+  locations: { latitude: number; longitude: number }[],
+): Promise<number[]> {
+  const body = {
+    locations: locations.map((l) => ({
+      latitude: l.latitude,
+      longitude: l.longitude,
+    })),
+  };
+
+  const response = await fetch(OPEN_ELEVATION_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) throw new Error(`Open-Elevation error: ${response.status}`);
+
+  const data = (await response.json()) as { results: { elevation: number }[] };
+  if (!data.results?.length) throw new Error("No elevation results returned");
+
+  return data.results.map((r) => r.elevation);
+}
+
 export async function getRouteElevation(
   coords: { latitude: number; longitude: number }[],
   totalDistanceMeters: number,
 ): Promise<ElevationData> {
-  const sampled = sampleCoordinates(coords, Math.min(20, coords.length));
-  const locations = sampled.map((c) => `${c.latitude},${c.longitude}`).join("|");
-  const url = `${TOPO_BASE}?locations=${locations}`;
-
-  const response = await fetch(url);
-  if (!response.ok) throw new Error("Elevation data unavailable");
-
-  const data = (await response.json()) as any;
-  if (data.status !== "OK") throw new Error("Elevation API error");
-
-  const elevations: number[] = data.results.map((r: any) => r.elevation as number);
+  const sampled = sampleCoordinates(coords, Math.min(25, coords.length));
+  const elevations = await fetchElevations(sampled);
   return computeElevationStats(elevations, totalDistanceMeters);
 }
 
 /**
- * Fetch elevation for multiple routes in a single API request to avoid
- * rate-limiting (OpenTopoData free tier: 1 req/sec).
+ * Fetch elevation for multiple routes in a single POST request so we avoid
+ * any per-request rate limits.
  */
 export async function getBatchElevation(
   routeCoords: { latitude: number; longitude: number }[][],
   routeDistances: number[],
 ): Promise<(ElevationData | null)[]> {
   const sampledArrays = routeCoords.map((coords) =>
-    sampleCoordinates(coords, Math.min(20, coords.length)),
+    sampleCoordinates(coords, Math.min(25, coords.length)),
   );
 
   const allPoints = sampledArrays.flat();
   if (allPoints.length === 0) return routeCoords.map(() => null);
 
-  const locations = allPoints
-    .map((c) => `${c.latitude},${c.longitude}`)
-    .join("|");
-
-  const response = await fetch(`${TOPO_BASE}?locations=${locations}`);
-  if (!response.ok) throw new Error("Elevation data unavailable");
-
-  const data = (await response.json()) as any;
-  if (data.status !== "OK") throw new Error("Elevation API error");
-
-  const allElevations: number[] = data.results.map((r: any) => r.elevation as number);
+  const allElevations = await fetchElevations(allPoints);
 
   const results: (ElevationData | null)[] = [];
   let offset = 0;

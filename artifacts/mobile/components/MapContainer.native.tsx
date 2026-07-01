@@ -1,16 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
+import MapView, { Marker, Polyline, Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { useRoute } from "@/context/RouteContext";
 import { useColors } from "@/hooks/useColors";
 import { reverseGeocode } from "@/services/geocoding";
+import { getIpLocation } from "@/services/ipLocation";
 
-const DEFAULT_REGION = {
-  latitude: 37.7749,
-  longitude: -122.4194,
-  latitudeDelta: 0.05,
-  longitudeDelta: 0.05,
+const FALLBACK_REGION: Region = {
+  latitude: 48.8566,
+  longitude: 2.3522,
+  latitudeDelta: 0.12,
+  longitudeDelta: 0.12,
 };
 
 export default function MapContainer() {
@@ -18,6 +19,19 @@ export default function MapContainer() {
   const { origin, destination, routes, selectedRouteId, setOrigin } = useRoute();
   const mapRef = useRef<MapView>(null);
   const [locating, setLocating] = useState(false);
+  const [initialRegion, setInitialRegion] = useState<Region>(FALLBACK_REGION);
+
+  // Set initial map region from IP on mount
+  useEffect(() => {
+    getIpLocation().then((loc) => {
+      setInitialRegion({
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        latitudeDelta: 0.12,
+        longitudeDelta: 0.12,
+      });
+    });
+  }, []);
 
   useEffect(() => {
     if (!mapRef.current) return;
@@ -81,7 +95,7 @@ export default function MapContainer() {
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
-        initialRegion={DEFAULT_REGION}
+        initialRegion={initialRegion}
         showsUserLocation
         showsCompass={false}
         showsMyLocationButton={false}

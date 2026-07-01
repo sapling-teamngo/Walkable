@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from "react-native";
 import { useRoute } from "@/context/RouteContext";
 import { reverseGeocode } from "@/services/geocoding";
+import { getIpLocation } from "@/services/ipLocation";
 
 const MAP_ID = "walkable-leaflet-map";
 
@@ -42,13 +43,18 @@ export default function MapContainer() {
   const readyRef = useRef(false);
 
   useEffect(() => {
-    loadLeaflet(() => {
+    // Fetch IP location while Leaflet loads — both in parallel
+    const ipPromise = getIpLocation();
+
+    loadLeaflet(async () => {
       const L = (window as any).L;
       const container = (document as any).getElementById(MAP_ID);
       if (!container || mapInstanceRef.current) return;
 
+      // Use IP location as initial center
+      const ipLoc = await ipPromise;
       const map = L.map(container, { zoomControl: true }).setView(
-        [37.7749, -122.4194],
+        [ipLoc.latitude, ipLoc.longitude],
         13,
       );
 
