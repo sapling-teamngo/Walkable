@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, TouchableOpacity, View } from "react-native";
 import MapView, { Callout, Marker, Polyline, Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { useRoute } from "@/context/RouteContext";
@@ -15,7 +15,7 @@ const FALLBACK_REGION: Region = {
 
 export default function MapContainer() {
   const colors = useColors();
-  const { origin, destination, routes, selectedRouteId, setOrigin } = useRoute();
+  const { origin, destination, routes, selectedRouteId, setOrigin, setDestination } = useRoute();
   const { pois } = usePOIs();
   const mapRef = useRef<MapView>(null);
   const [locating, setLocating] = useState(false);
@@ -54,6 +54,26 @@ export default function MapContainer() {
     }
   }, [routes, selectedRouteId, origin, destination]);
 
+  const handleLongPress = async (lat: number, lng: number) => {
+    let loc: any;
+    try {
+      loc = await reverseGeocode(lat, lng);
+    } catch {
+      loc = {
+        id: `${lat},${lng}`,
+        name: "Selected Location",
+        displayName: "Selected Location",
+        latitude: lat,
+        longitude: lng,
+      };
+    }
+    Alert.alert(loc.name, "Set this location as:", [
+      { text: "Set as Start",       onPress: () => setOrigin(loc) },
+      { text: "Set as Destination", onPress: () => setDestination(loc) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
+
   const handleLocateMe = async () => {
     setLocating(true);
     try {
@@ -85,6 +105,10 @@ export default function MapContainer() {
         showsUserLocation
         showsCompass={false}
         showsMyLocationButton={false}
+        onLongPress={(e) => {
+          const { latitude, longitude } = e.nativeEvent.coordinate;
+          handleLongPress(latitude, longitude);
+        }}
       >
         {/* De-selected route (faded) */}
         {otherRoute && (

@@ -32,7 +32,7 @@ function loadLeaflet(onReady: () => void) {
 }
 
 export default function MapContainer() {
-  const { origin, destination, routes, selectedRouteId, setOrigin } = useRoute();
+  const { origin, destination, routes, selectedRouteId, setOrigin, setDestination } = useRoute();
   const { pois } = usePOIs();
   const [locating, setLocating] = useState(false);
 
@@ -42,6 +42,12 @@ export default function MapContainer() {
   const poiMarkersRef   = useRef<any[]>([]);
   const userDotRef      = useRef<any>(null);
   const readyRef        = useRef(false);
+
+  // Stable refs so Leaflet event handlers always call the latest setters
+  const setOriginRef      = useRef(setOrigin);
+  const setDestinationRef = useRef(setDestination);
+  useEffect(() => { setOriginRef.current = setOrigin; },      [setOrigin]);
+  useEffect(() => { setDestinationRef.current = setDestination; }, [setDestination]);
 
   // ── Initialise Leaflet map ──────────────────────────────────────────────
   useEffect(() => {
@@ -68,6 +74,53 @@ export default function MapContainer() {
       mapInstanceRef.current = map;
       readyRef.current = true;
       map.whenReady(() => setTimeout(() => map.invalidateSize(), 100));
+
+      // ── Long-press / right-click: pick a location ────────────────────────
+      map.on("contextmenu", async (e: any) => {
+        e.originalEvent?.preventDefault();
+        const { lat, lng } = e.latlng;
+
+        // Phase 1 – open popup immediately with a loading indicator
+        const popup = L.popup({ closeButton: true, maxWidth: 220 })
+          .setLatLng([lat, lng])
+          .setContent(
+            `<div style="font-family:-apple-system,sans-serif;padding:4px 0;min-width:180px">` +
+            `<p style="margin:0 0 8px;font-size:12px;color:#888">Finding location…</p>` +
+            `<div style="display:flex;gap:6px">` +
+            `<button disabled style="flex:1;padding:8px;background:#1B6B3A;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;opacity:.5">Start</button>` +
+            `<button disabled style="flex:1;padding:8px;background:#EF4444;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;opacity:.5">Destination</button>` +
+            `</div></div>`,
+          )
+          .openOn(map);
+
+        // Phase 2 – reverse geocode, then refresh popup with live buttons
+        let loc: any;
+        try {
+          loc = await reverseGeocode(lat, lng);
+        } catch {
+          loc = { id: `${lat},${lng}`, name: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, displayName: "Selected Location", latitude: lat, longitude: lng };
+        }
+
+        popup.setContent(
+          `<div style="font-family:-apple-system,sans-serif;padding:4px 0;min-width:180px">` +
+          `<p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px">${loc.name}</p>` +
+          `<div style="display:flex;gap:6px">` +
+          `<button id="lp-start" style="flex:1;padding:8px;background:#1B6B3A;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">Set Start</button>` +
+          `<button id="lp-end" style="flex:1;padding:8px;background:#EF4444;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">Set Destination</button>` +
+          `</div></div>`,
+        );
+
+        setTimeout(() => {
+          (document as any).getElementById("lp-start")?.addEventListener("click", () => {
+            setOriginRef.current(loc);
+            map.closePopup();
+          });
+          (document as any).getElementById("lp-end")?.addEventListener("click", () => {
+            setDestinationRef.current(loc);
+            map.closePopup();
+          });
+        }, 40);
+      });
     });
 
     return () => {
