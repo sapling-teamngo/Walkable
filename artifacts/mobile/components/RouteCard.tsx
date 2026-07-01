@@ -37,6 +37,23 @@ function gradeColor(grade: number): string {
   return "#DC2626";
 }
 
+/** Fixed-size icon container that neutralises Feather's implicit font padding on web. */
+function Icon({
+  name,
+  size,
+  color,
+}: {
+  name: keyof typeof Feather.glyphMap;
+  size: number;
+  color: string;
+}) {
+  return (
+    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+      <Feather name={name} size={size} color={color} />
+    </View>
+  );
+}
+
 export default function RouteCard({ route, isSelected, onSelect }: Props) {
   const colors = useColors();
   const elev = route.elevationData;
@@ -54,36 +71,41 @@ export default function RouteCard({ route, isSelected, onSelect }: Props) {
         },
       ]}
     >
+      {/* Header: label badge + selected checkmark */}
       <View style={styles.header}>
         <View style={[styles.badge, { backgroundColor: route.color }]}>
           <Text style={styles.badgeText}>{route.label}</Text>
         </View>
         {isSelected && (
           <View style={[styles.selectedDot, { backgroundColor: route.color }]}>
-            <Feather name="check" size={12} color="#fff" />
+            <Icon name="check" size={12} color="#fff" />
           </View>
         )}
       </View>
 
+      {/* Stats row */}
       <View style={styles.stats}>
         <View style={styles.stat}>
-          <Feather name="map" size={14} color={colors.mutedForeground} />
+          <Icon name="map" size={14} color={colors.mutedForeground} />
           <Text style={[styles.statValue, { color: colors.foreground }]}>
             {formatDistance(route.distance)}
           </Text>
         </View>
+
         <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
         <View style={styles.stat}>
-          <Feather name="clock" size={14} color={colors.mutedForeground} />
+          <Icon name="clock" size={14} color={colors.mutedForeground} />
           <Text style={[styles.statValue, { color: colors.foreground }]}>
             {formatDuration(route.duration)}
           </Text>
         </View>
+
         {elev && (
           <>
             <View style={[styles.divider, { backgroundColor: colors.border }]} />
             <View style={styles.stat}>
-              <Feather name="trending-up" size={14} color={colors.mutedForeground} />
+              <Icon name="trending-up" size={14} color={colors.mutedForeground} />
               <Text style={[styles.statValue, { color: colors.foreground }]}>
                 +{elev.gain}m
               </Text>
@@ -92,6 +114,7 @@ export default function RouteCard({ route, isSelected, onSelect }: Props) {
         )}
       </View>
 
+      {/* Grade pill */}
       {elev && (
         <View style={styles.gradeRow}>
           <View
@@ -100,9 +123,7 @@ export default function RouteCard({ route, isSelected, onSelect }: Props) {
               { backgroundColor: gradeColor(elev.maxGrade) + "18" },
             ]}
           >
-            <View
-              style={[styles.gradeDot, { backgroundColor: gradeColor(elev.maxGrade) }]}
-            />
+            <View style={[styles.gradeDot, { backgroundColor: gradeColor(elev.maxGrade) }]} />
             <Text style={[styles.gradeText, { color: gradeColor(elev.maxGrade) }]}>
               {gradeLabel(elev.maxGrade)} · max {elev.maxGrade}% grade
             </Text>
@@ -142,24 +163,27 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
   stats: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    flexWrap: "nowrap",
   },
   stat: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
+    gap: 4,
   },
   statValue: {
-    fontSize: 14,
+    fontSize: 13,
     fontFamily: "Inter_600SemiBold",
-  },
+    includeFontPadding: false,
+  } as any,
   divider: {
     width: StyleSheet.hairlineWidth,
-    height: 16,
+    height: 14,
   },
   gradeRow: {
     flexDirection: "row",
@@ -180,5 +204,6 @@ const styles = StyleSheet.create({
   gradeText: {
     fontSize: 11,
     fontFamily: "Inter_500Medium",
-  },
+    includeFontPadding: false,
+  } as any,
 });

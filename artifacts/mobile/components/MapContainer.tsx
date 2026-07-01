@@ -51,9 +51,9 @@ export default function MapContainer() {
       const container = (document as any).getElementById(MAP_ID);
       if (!container || mapInstanceRef.current) return;
 
-      // Use IP location as initial center + set search bias
+      // Use IP location as initial center + set search bias (with country code)
       const ipLoc = await ipPromise;
-      setSearchBias(ipLoc.latitude, ipLoc.longitude);
+      setSearchBias(ipLoc.latitude, ipLoc.longitude, ipLoc.countryCode);
       const map = L.map(container, { zoomControl: true }).setView(
         [ipLoc.latitude, ipLoc.longitude],
         13,

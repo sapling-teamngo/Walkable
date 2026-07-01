@@ -9,26 +9,36 @@ export interface GeoLocation {
 const PHOTON_URL = "https://photon.komoot.io/api/";
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org";
 
-// Bias coordinates set once from IP location — improves local relevance
-let _biasLat: number | null = null;
-let _biasLon: number | null = null;
-
-export function setSearchBias(lat: number, lon: number) {
-  _biasLat = lat;
-  _biasLon = lon;
+interface SearchBias {
+  lat: number;
+  lon: number;
+  /** ISO 3166-1 alpha-2, e.g. "IN". Used to restrict Nominatim fallback. */
+  countryCode: string;
 }
 
-// ── Photon (primary) ────────────────────────────────────────────────────────
-// Photon is built on OpenStreetMap + Elasticsearch. It has fuzzy matching,
-// multilingual support (Arabic, CJK, etc.), and location-biasing built in.
-// Every result maps to a real OSM feature, so it always appears on the map.
+let _bias: SearchBias | null = null;
+
+export function setSearchBias(lat: number, lon: number, countryCode = "") {
+  _bias = { lat, lon, countryCode };
+}
+
+// ── Photon (primary) ─────────────────────────────────────────────────────────
+// Photon uses Elasticsearch on top of OSM data.
+// • Fuzzy matching built-in
+// • Multilingual (Arabic, CJK, Hebrew, transliterations, …)
+// • lat/lon + zoom bias: zoom ≈ 10 gives country-scale locality preference
+//   while still showing world results when nothing local matches.
+// • Every result is a real OSM node/way, so it always renders on the map.
 
 async function searchPhoton(query: string): Promise<GeoLocation[]> {
-  const params = new URLSearchParams({ q: query, limit: "7" });
+  const params = new URLSearchParams({ q: query, limit: "8" });
 
-  if (_biasLat !== null && _biasLon !== null) {
-    params.set("lat", _biasLat.toString());
-    params.set("lon", _biasLon.toString());
+  if (_bias) {
+    params.set("lat", _bias.lat.toString());
+    params.set("lon", _bias.lon.toString());
+    // zoom 10 ≈ city/region scale — local results float to the top without
+    // hiding genuinely better matches from other countries.
+    params.set("zoom", "10");
   }
 
   const res = await fetch(`${PHOTON_URL}?${params}`, {
@@ -43,7 +53,6 @@ async function searchPhoton(query: string): Promise<GeoLocation[]> {
     const p = f.properties ?? {};
     const [lon, lat] = f.geometry.coordinates as [number, number];
 
-    // Build a human-readable primary name
     const streetAddr =
       p.housenumber && p.street
         ? `${p.housenumber} ${p.street}`
@@ -83,16 +92,24 @@ async function searchPhoton(query: string): Promise<GeoLocation[]> {
   return results;
 }
 
-// ── Nominatim (fallback) ────────────────────────────────────────────────────
+// ── Nominatim (fallback) ──────────────────────────────────────────────────────
 
 async function searchNominatim(query: string): Promise<GeoLocation[]> {
   const isArabic = /[\u0600-\u06FF]/.test(query);
 
-  const url =
-    `${NOMINATIM_URL}/search?q=${encodeURIComponent(query)}` +
-    `&format=json&limit=7&addressdetails=0`;
+  const params = new URLSearchParams({
+    q: query,
+    format: "json",
+    limit: "7",
+    addressdetails: "0",
+  });
 
-  const res = await fetch(url, {
+  // Bias toward user's country so local results rank first
+  if (_bias?.countryCode) {
+    params.set("countrycodes", _bias.countryCode.toLowerCase());
+  }
+
+  const res = await fetch(`${NOMINATIM_URL}/search?${params}`, {
     headers: {
       "Accept-Language": isArabic ? "ar,en" : "en,*",
       "User-Agent": "WalkableApp/1.0 (pedestrian-routing)",
@@ -101,16 +118,35 @@ async function searchNominatim(query: string): Promise<GeoLocation[]> {
   if (!res.ok) return [];
 
   const data = (await res.json()) as any[];
-  return data.map((item: any) => ({
+
+  // If countrycodes filter returned nothing, retry without restriction
+  if (data.length === 0 && _bias?.countryCode) {
+    params.delete("countrycodes");
+    const retry = await fetch(`${NOMINATIM_URL}/search?${params}`, {
+      headers: {
+        "Accept-Language": isArabic ? "ar,en" : "en,*",
+        "User-Agent": "WalkableApp/1.0 (pedestrian-routing)",
+      },
+    });
+    if (!retry.ok) return [];
+    const retryData = (await retry.json()) as any[];
+    return retryData.map((item: any) => nominatimToGeo(item));
+  }
+
+  return data.map((item: any) => nominatimToGeo(item));
+}
+
+function nominatimToGeo(item: any): GeoLocation {
+  return {
     id: item.place_id.toString(),
     name: item.display_name.split(",").slice(0, 2).join(", ").trim(),
     displayName: item.display_name,
     latitude: parseFloat(item.lat),
     longitude: parseFloat(item.lon),
-  }));
+  };
 }
 
-// ── Public API ───────────────────────────────────────────────────────────────
+// ── Public API ────────────────────────────────────────────────────────────────
 
 export async function searchPlaces(query: string): Promise<GeoLocation[]> {
   const q = query.trim();
@@ -119,7 +155,6 @@ export async function searchPlaces(query: string): Promise<GeoLocation[]> {
   try {
     const results = await searchPhoton(q);
     if (results.length > 0) return results;
-    // Photon returned nothing — try Nominatim as fallback
     return await searchNominatim(q);
   } catch {
     try {
@@ -135,8 +170,7 @@ export async function reverseGeocode(
   longitude: number,
 ): Promise<GeoLocation> {
   try {
-    const url =
-      `${NOMINATIM_URL}/reverse?lat=${latitude}&lon=${longitude}&format=json`;
+    const url = `${NOMINATIM_URL}/reverse?lat=${latitude}&lon=${longitude}&format=json`;
     const res = await fetch(url, {
       headers: {
         "Accept-Language": "en",

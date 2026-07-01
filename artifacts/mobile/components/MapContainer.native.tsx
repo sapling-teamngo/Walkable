@@ -24,7 +24,7 @@ export default function MapContainer() {
   // Set initial map region from IP on mount + seed search bias
   useEffect(() => {
     getIpLocation().then((loc) => {
-      setSearchBias(loc.latitude, loc.longitude);
+      setSearchBias(loc.latitude, loc.longitude, loc.countryCode);
       setInitialRegion({
         latitude: loc.latitude,
         longitude: loc.longitude,
