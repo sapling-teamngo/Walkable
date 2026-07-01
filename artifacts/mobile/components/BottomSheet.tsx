@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Animated,
   Dimensions,
+  Linking,
   PanResponder,
   Platform,
   ScrollView,
@@ -125,6 +126,28 @@ export default function BottomSheet() {
 
   const handleFindRoute = async () => {
     await searchRoutes();
+  };
+
+  const handleOpenGoogleMaps = () => {
+    if (!origin || !destination) return;
+    const sel = routes.find((r) => r.id === selectedRouteId) ?? routes[0];
+    const o = `${origin.latitude},${origin.longitude}`;
+    const d = `${destination.latitude},${destination.longitude}`;
+
+    let waypointsParam = "";
+    if (sel && sel.coordinates.length > 4) {
+      const mid = sel.coordinates[Math.floor(sel.coordinates.length / 2)];
+      waypointsParam = `&waypoints=${mid.latitude},${mid.longitude}`;
+    }
+
+    const url =
+      `https://www.google.com/maps/dir/?api=1` +
+      `&origin=${o}` +
+      `&destination=${d}` +
+      waypointsParam +
+      `&travelmode=walking`;
+
+    Linking.openURL(url);
   };
 
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -266,11 +289,22 @@ export default function BottomSheet() {
               <Feather name="arrow-left" size={20} color={colors.foreground} />
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.startBtn, { backgroundColor: colors.primary }]}
+              style={[styles.mapsBtn, { borderColor: colors.border }]}
+              onPress={handleOpenGoogleMaps}
               activeOpacity={0.85}
             >
-              <Feather name="navigation" size={18} color="#fff" />
-              <Text style={styles.startBtnText}>Start Walk</Text>
+              <Feather name="map" size={17} color={colors.foreground} />
+              <Text style={[styles.mapsBtnText, { color: colors.foreground }]}>
+                Google Maps
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.startBtn, { backgroundColor: colors.primary }]}
+              onPress={handleOpenGoogleMaps}
+              activeOpacity={0.85}
+            >
+              <Feather name="navigation" size={17} color="#fff" />
+              <Text style={styles.startBtnText}>Navigate</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -369,7 +403,7 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     flexDirection: "row",
-    gap: 12,
+    gap: 10,
     alignItems: "center",
   },
   backBtn: {
@@ -380,6 +414,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  mapsBtn: {
+    flex: 1,
+    height: 50,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+  mapsBtnText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+  },
   startBtn: {
     flex: 1,
     height: 50,
@@ -387,11 +435,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    gap: 8,
   },
   startBtnText: {
     color: "#fff",
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: "Inter_600SemiBold",
   },
 });

@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useState } from "react";
 import { GeoLocation } from "@/services/geocoding";
 import { getWalkingRoutes, RouteCoord } from "@/services/routing";
-import { ElevationData, getRouteElevation } from "@/services/elevation";
+import { ElevationData, getBatchElevation } from "@/services/elevation";
 
 export interface WalkRoute {
   id: "flat" | "fast";
@@ -49,10 +49,10 @@ export function RouteProvider({ children }: { children: React.ReactNode }) {
         { latitude: destination.latitude, longitude: destination.longitude },
       );
 
-      const elevationPromises = osrmRoutes.map((r) =>
-        getRouteElevation(r.coordinates, r.distance).catch(() => null),
-      );
-      const elevations = await Promise.all(elevationPromises);
+      const elevations = await getBatchElevation(
+        osrmRoutes.map((r) => r.coordinates),
+        osrmRoutes.map((r) => r.distance),
+      ).catch(() => osrmRoutes.map(() => null));
 
       let walkRoutes: WalkRoute[] = osrmRoutes.map((r, i) => ({
         id: i === 0 ? ("fast" as const) : ("flat" as const),
