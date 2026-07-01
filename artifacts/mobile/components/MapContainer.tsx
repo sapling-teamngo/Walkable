@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from "react-native";
 import { useRoute } from "@/context/RouteContext";
-import { reverseGeocode } from "@/services/geocoding";
+import { reverseGeocode, setSearchBias } from "@/services/geocoding";
 import { getIpLocation } from "@/services/ipLocation";
 
 const MAP_ID = "walkable-leaflet-map";
@@ -51,8 +51,9 @@ export default function MapContainer() {
       const container = (document as any).getElementById(MAP_ID);
       if (!container || mapInstanceRef.current) return;
 
-      // Use IP location as initial center
+      // Use IP location as initial center + set search bias
       const ipLoc = await ipPromise;
+      setSearchBias(ipLoc.latitude, ipLoc.longitude);
       const map = L.map(container, { zoomControl: true }).setView(
         [ipLoc.latitude, ipLoc.longitude],
         13,

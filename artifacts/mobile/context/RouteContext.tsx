@@ -54,17 +54,36 @@ export function RouteProvider({ children }: { children: React.ReactNode }) {
         osrmRoutes.map((r) => r.distance),
       ).catch(() => osrmRoutes.map(() => null));
 
-      let walkRoutes: WalkRoute[] = osrmRoutes.map((r, i) => ({
-        id: i === 0 ? ("fast" as const) : ("flat" as const),
-        label: i === 0 ? "Fastest" : "Flattest",
-        color: i === 0 ? "#2563EB" : "#1B6B3A",
+      // When only 1 route: label it "Best Route" (flat id so map highlights green)
+      if (osrmRoutes.length === 1) {
+        const single: WalkRoute = {
+          id: "flat",
+          label: "Best Route",
+          color: "#1B6B3A",
+          coordinates: osrmRoutes[0].coordinates,
+          distance: osrmRoutes[0].distance,
+          duration: osrmRoutes[0].duration,
+          elevationData: elevations[0],
+        };
+        setRoutes([single]);
+        setSelectedRouteId("flat");
+        return;
+      }
+
+      // 2 routes: sort by elevation gain so the flatter one is always first
+      let walkRoutes: WalkRoute[] = osrmRoutes.slice(0, 2).map((r, i) => ({
+        id: i === 0 ? ("flat" as const) : ("fast" as const),
+        label: i === 0 ? "Flattest" : "Fastest",
+        color: i === 0 ? "#1B6B3A" : "#2563EB",
         coordinates: r.coordinates,
         distance: r.distance,
         duration: r.duration,
         elevationData: elevations[i],
       }));
 
-      if (walkRoutes.length >= 2) {
+      // If we have elevation data, re-sort so the lower-gain route = Flattest
+      const hasElev = elevations.some((e) => e !== null);
+      if (hasElev) {
         const sorted = [...walkRoutes].sort((a, b) => {
           const gainA = a.elevationData?.gain ?? Infinity;
           const gainB = b.elevationData?.gain ?? Infinity;

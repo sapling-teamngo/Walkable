@@ -4,7 +4,7 @@ import MapView, { Marker, Polyline, Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { useRoute } from "@/context/RouteContext";
 import { useColors } from "@/hooks/useColors";
-import { reverseGeocode } from "@/services/geocoding";
+import { reverseGeocode, setSearchBias } from "@/services/geocoding";
 import { getIpLocation } from "@/services/ipLocation";
 
 const FALLBACK_REGION: Region = {
@@ -21,9 +21,10 @@ export default function MapContainer() {
   const [locating, setLocating] = useState(false);
   const [initialRegion, setInitialRegion] = useState<Region>(FALLBACK_REGION);
 
-  // Set initial map region from IP on mount
+  // Set initial map region from IP on mount + seed search bias
   useEffect(() => {
     getIpLocation().then((loc) => {
+      setSearchBias(loc.latitude, loc.longitude);
       setInitialRegion({
         latitude: loc.latitude,
         longitude: loc.longitude,

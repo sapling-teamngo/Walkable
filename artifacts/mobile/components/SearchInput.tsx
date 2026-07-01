@@ -44,7 +44,7 @@ export default function SearchInput({
   const handleChange = useCallback((text: string) => {
     setQuery(text);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (text.length < 3) {
+    if (text.length < 2) {
       setSuggestions([]);
       return;
     }
@@ -53,7 +53,7 @@ export default function SearchInput({
       const results = await searchPlaces(text);
       setSuggestions(results);
       setLoading(false);
-    }, 500);
+    }, 350);
   }, []);
 
   const handleSelect = useCallback(
