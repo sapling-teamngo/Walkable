@@ -84,11 +84,10 @@ export function RouteProvider({ children }: { children: React.ReactNode }) {
       // If we have elevation data, re-sort so the lower-gain route = Flattest
       const hasElev = elevations.some((e) => e !== null);
       if (hasElev) {
-        const sorted = [...walkRoutes].sort((a, b) => {
-          const gainA = a.elevationData?.gain ?? Infinity;
-          const gainB = b.elevationData?.gain ?? Infinity;
-          return gainA - gainB;
-        });
+        // Use Number.isFinite to guard against NaN/null gain values so sort is always stable
+        const safeGain = (r: (typeof walkRoutes)[0]) =>
+          Number.isFinite(r.elevationData?.gain) ? r.elevationData!.gain : Infinity;
+        const sorted = [...walkRoutes].sort((a, b) => safeGain(a) - safeGain(b));
         walkRoutes = [
           { ...sorted[0], id: "flat", label: "Flattest", color: "#1B6B3A" },
           { ...sorted[1], id: "fast", label: "Fastest", color: "#2563EB" },

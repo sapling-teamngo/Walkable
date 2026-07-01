@@ -10,8 +10,9 @@ export interface OsrmRoute {
 }
 
 const OSRM_BASE = "https://router.project-osrm.org";
+const FETCH_TIMEOUT_MS = 8_000;
 
-function toOsrmCoord(p: RouteCoord) {
+function toCoordStr(p: RouteCoord) {
   return `${p.longitude},${p.latitude}`;
 }
 
@@ -19,33 +20,42 @@ async function fetchOsrmRoutes(
   waypoints: RouteCoord[],
   alternatives: boolean,
 ): Promise<OsrmRoute[]> {
-  const coordStr = waypoints.map(toOsrmCoord).join(";");
-  const altParam = alternatives ? "&alternatives=3" : "";
-  const url =
-    `${OSRM_BASE}/route/v1/foot/${coordStr}` +
-    `?overview=full&geometries=geojson${altParam}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("Routing service unavailable");
+  try {
+    const coordStr = waypoints.map(toCoordStr).join(";");
+    const altParam = alternatives ? "&alternatives=3" : "";
+    const url =
+      `${OSRM_BASE}/route/v1/foot/${coordStr}` +
+      `?overview=full&geometries=geojson${altParam}`;
 
-  const data = (await res.json()) as any;
-  if (data.code !== "Ok") {
-    throw new Error(data.message ?? "No walking route found between these locations");
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) throw new Error("Routing service unavailable");
+
+    const data = (await res.json()) as any;
+    if (data.code !== "Ok") {
+      throw new Error(
+        data.message ?? "No walking route found between these locations",
+      );
+    }
+
+    return (data.routes as any[]).map((r: any) => ({
+      distance: r.distance as number,
+      duration: r.duration as number,
+      coordinates: (r.geometry.coordinates as [number, number][]).map(
+        ([lon, lat]) => ({ latitude: lat, longitude: lon }),
+      ),
+    }));
+  } finally {
+    clearTimeout(timer);
   }
-
-  return (data.routes as any[]).map((r: any) => ({
-    distance: r.distance as number,
-    duration: r.duration as number,
-    coordinates: (r.geometry.coordinates as [number, number][]).map(
-      ([lon, lat]) => ({ latitude: lat, longitude: lon }),
-    ),
-  }));
 }
 
 /**
  * Returns a midpoint offset perpendicular to the origin→destination line.
- * This forces OSRM to route via a different corridor, producing a genuine
- * second route even when the direct path has no OSRM alternatives.
+ * Rotating the direction vector 90° and scaling by `factor` gives a corridor
+ * that forces OSRM through a genuinely different part of the street network.
  */
 function perpendicularMidpoint(
   o: RouteCoord,
@@ -54,7 +64,6 @@ function perpendicularMidpoint(
 ): RouteCoord {
   const midLat = (o.latitude + d.latitude) / 2;
   const midLon = (o.longitude + d.longitude) / 2;
-  // Rotate the direction vector 90° and scale by factor
   const dx = d.longitude - o.longitude;
   const dy = d.latitude - o.latitude;
   return {
@@ -63,53 +72,51 @@ function perpendicularMidpoint(
   };
 }
 
-function coordsAreDifferent(a: OsrmRoute, b: OsrmRoute): boolean {
-  // Routes are meaningfully different if their midpoints differ by > ~50m
+/** True when two routes diverge enough to be worth showing separately (~50 m). */
+function routesAreDifferent(a: OsrmRoute, b: OsrmRoute): boolean {
   const midA = a.coordinates[Math.floor(a.coordinates.length / 2)];
   const midB = b.coordinates[Math.floor(b.coordinates.length / 2)];
-  const dlat = Math.abs(midA.latitude - midB.latitude);
-  const dlon = Math.abs(midA.longitude - midB.longitude);
-  return dlat > 0.0004 || dlon > 0.0004; // ~44m in each axis
+  return (
+    Math.abs(midA.latitude - midB.latitude) > 0.0004 ||
+    Math.abs(midA.longitude - midB.longitude) > 0.0004
+  );
 }
 
 export async function getWalkingRoutes(
   origin: RouteCoord,
   destination: RouteCoord,
 ): Promise<OsrmRoute[]> {
-  // ── Step 1: ask OSRM for up to 3 alternatives ────────────────────────────
+  // ── Step 1: ask OSRM for up to 3 built-in alternatives ───────────────────
   const primary = await fetchOsrmRoutes([origin, destination], true);
+  const uniquePrimary = primary.filter(
+    (r, i) => i === 0 || routesAreDifferent(primary[0], r),
+  );
+  if (uniquePrimary.length >= 2) return uniquePrimary.slice(0, 2);
 
-  const unique = primary.filter(
-    (r, i) => i === 0 || coordsAreDifferent(primary[0], r),
+  // ── Step 2: fire all 4 perpendicular via-point attempts in parallel ───────
+  // (sequential retries were too slow; parallel cuts wait time by ~75 %)
+  const factors = [0.005, -0.005, 0.01, -0.01];
+  const directDist = primary[0]?.distance ?? Infinity;
+
+  const attempts = await Promise.allSettled(
+    factors.map((f) => {
+      const via = perpendicularMidpoint(origin, destination, f);
+      return fetchOsrmRoutes([origin, via, destination], false);
+    }),
   );
 
-  if (unique.length >= 2) return unique.slice(0, 2);
-
-  // ── Step 2: force a second path via perpendicular via-points ─────────────
-  const factors = [0.005, -0.005, 0.01, -0.01];
-
-  for (const factor of factors) {
-    try {
-      const via = perpendicularMidpoint(origin, destination, factor);
-      const alt = await fetchOsrmRoutes([origin, via, destination], false);
-
-      if (alt.length > 0) {
-        const candidate = alt[0];
-        const directDist = primary[0].distance;
-
-        // Accept if the alternate is at most 60% longer than the direct route
-        if (
-          candidate.distance <= directDist * 1.6 &&
-          coordsAreDifferent(primary[0], candidate)
-        ) {
-          return [primary[0], candidate];
-        }
-      }
-    } catch {
-      // Try next factor
+  for (const result of attempts) {
+    if (result.status !== "fulfilled" || result.value.length === 0) continue;
+    const candidate = result.value[0];
+    // Accept if ≤ 60 % longer than direct and genuinely different
+    if (
+      candidate.distance <= directDist * 1.6 &&
+      (!primary[0] || routesAreDifferent(primary[0], candidate))
+    ) {
+      return [primary[0], candidate].filter(Boolean);
     }
   }
 
-  // ── Step 3: return what we have (may be just 1 route) ────────────────────
+  // ── Step 3: graceful single-route fallback ────────────────────────────────
   return primary.slice(0, 1);
 }

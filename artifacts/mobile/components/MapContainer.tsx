@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from "react-native";
 import { useRoute } from "@/context/RouteContext";
+import { usePOIs } from "@/context/POIContext";
 import { reverseGeocode, setSearchBias } from "@/services/geocoding";
 import { getIpLocation } from "@/services/ipLocation";
+import { POI_CATEGORIES } from "@/services/pois";
 
 const MAP_ID = "walkable-leaflet-map";
 
@@ -10,10 +12,7 @@ function loadLeaflet(onReady: () => void) {
   const win = window as any;
   const doc = document as any;
 
-  if (win.L) {
-    onReady();
-    return;
-  }
+  if (win.L) { onReady(); return; }
 
   if (!doc.querySelector("#leaflet-css")) {
     const link = doc.createElement("link");
@@ -34,16 +33,18 @@ function loadLeaflet(onReady: () => void) {
 
 export default function MapContainer() {
   const { origin, destination, routes, selectedRouteId, setOrigin } = useRoute();
+  const { pois } = usePOIs();
   const [locating, setLocating] = useState(false);
 
-  const mapInstanceRef = useRef<any>(null);
-  const markersRef = useRef<any[]>([]);
-  const polylinesRef = useRef<any[]>([]);
-  const userDotRef = useRef<any>(null);
-  const readyRef = useRef(false);
+  const mapInstanceRef  = useRef<any>(null);
+  const markersRef      = useRef<any[]>([]);
+  const polylinesRef    = useRef<any[]>([]);
+  const poiMarkersRef   = useRef<any[]>([]);
+  const userDotRef      = useRef<any>(null);
+  const readyRef        = useRef(false);
 
+  // ── Initialise Leaflet map ──────────────────────────────────────────────
   useEffect(() => {
-    // Fetch IP location while Leaflet loads — both in parallel
     const ipPromise = getIpLocation();
 
     loadLeaflet(async () => {
@@ -51,12 +52,11 @@ export default function MapContainer() {
       const container = (document as any).getElementById(MAP_ID);
       if (!container || mapInstanceRef.current) return;
 
-      // Use IP location as initial center + set search bias (with country code)
       const ipLoc = await ipPromise;
       setSearchBias(ipLoc.latitude, ipLoc.longitude, ipLoc.countryCode);
+
       const map = L.map(container, { zoomControl: true }).setView(
-        [ipLoc.latitude, ipLoc.longitude],
-        13,
+        [ipLoc.latitude, ipLoc.longitude], 13,
       );
 
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -67,10 +67,7 @@ export default function MapContainer() {
 
       mapInstanceRef.current = map;
       readyRef.current = true;
-
-      map.whenReady(() => {
-        setTimeout(() => map.invalidateSize(), 100);
-      });
+      map.whenReady(() => setTimeout(() => map.invalidateSize(), 100));
     });
 
     return () => {
@@ -82,8 +79,9 @@ export default function MapContainer() {
     };
   }, []);
 
+  // ── Route & waypoint markers ────────────────────────────────────────────
   useEffect(() => {
-    const checkAndUpdate = () => {
+    const update = () => {
       const L = (window as any).L;
       const map = mapInstanceRef.current;
       if (!L || !map) return;
@@ -94,52 +92,35 @@ export default function MapContainer() {
       polylinesRef.current = [];
 
       if (origin) {
-        const marker = L.circleMarker([origin.latitude, origin.longitude], {
-          radius: 10,
-          color: "#1B6B3A",
-          fillColor: "#1B6B3A",
-          fillOpacity: 1,
-          weight: 2,
-        })
-          .bindPopup("Start")
-          .addTo(map);
-        markersRef.current.push(marker);
+        markersRef.current.push(
+          L.circleMarker([origin.latitude, origin.longitude], {
+            radius: 10, color: "#1B6B3A", fillColor: "#1B6B3A", fillOpacity: 1, weight: 2,
+          }).bindPopup("Start").addTo(map),
+        );
       }
 
       if (destination) {
-        const marker = L.circleMarker(
-          [destination.latitude, destination.longitude],
-          {
-            radius: 10,
-            color: "#EF4444",
-            fillColor: "#EF4444",
-            fillOpacity: 1,
-            weight: 2,
-          },
-        )
-          .bindPopup("End")
-          .addTo(map);
-        markersRef.current.push(marker);
+        markersRef.current.push(
+          L.circleMarker([destination.latitude, destination.longitude], {
+            radius: 10, color: "#EF4444", fillColor: "#EF4444", fillOpacity: 1, weight: 2,
+          }).bindPopup("End").addTo(map),
+        );
       }
 
       routes.forEach((route) => {
         const isSelected = route.id === selectedRouteId;
         const latlngs = route.coordinates.map((c: any) => [c.latitude, c.longitude]);
 
-        const shadow = L.polyline(latlngs, {
-          color: route.color,
-          weight: 10,
-          opacity: isSelected ? 0.18 : 0,
-        }).addTo(map);
-
-        const line = L.polyline(latlngs, {
-          color: route.color,
-          weight: 5,
-          opacity: isSelected ? 1 : 0.3,
-          dashArray: isSelected ? null : "8, 5",
-        }).addTo(map);
-
-        polylinesRef.current.push(shadow, line);
+        polylinesRef.current.push(
+          L.polyline(latlngs, {
+            color: route.color, weight: 10, opacity: isSelected ? 0.18 : 0,
+          }).addTo(map),
+          L.polyline(latlngs, {
+            color: route.color, weight: 5,
+            opacity: isSelected ? 1 : 0.3,
+            dashArray: isSelected ? null : "8, 5",
+          }).addTo(map),
+        );
       });
 
       if (routes.length > 0) {
@@ -149,10 +130,7 @@ export default function MapContainer() {
         map.fitBounds(allCoords, { padding: [50, 50], maxZoom: 15 });
       } else if (origin && destination) {
         map.fitBounds(
-          [
-            [origin.latitude, origin.longitude],
-            [destination.latitude, destination.longitude],
-          ],
+          [[origin.latitude, origin.longitude], [destination.latitude, destination.longitude]],
           { padding: [60, 60] },
         );
       } else if (origin) {
@@ -163,81 +141,80 @@ export default function MapContainer() {
     };
 
     if (readyRef.current) {
-      checkAndUpdate();
+      update();
     } else {
-      const interval = setInterval(() => {
-        if (readyRef.current) {
-          clearInterval(interval);
-          checkAndUpdate();
-        }
+      const iv = setInterval(() => {
+        if (readyRef.current) { clearInterval(iv); update(); }
       }, 200);
-      return () => clearInterval(interval);
+      return () => clearInterval(iv);
     }
   }, [routes, selectedRouteId, origin, destination]);
 
+  // ── POI markers ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    const L = (window as any).L;
+    const map = mapInstanceRef.current;
+    if (!L || !map) return;
+
+    poiMarkersRef.current.forEach((m) => m.remove());
+    poiMarkersRef.current = [];
+
+    for (const poi of pois) {
+      const meta = POI_CATEGORIES[poi.category];
+      const marker = L.circleMarker([poi.latitude, poi.longitude], {
+        radius: 5,
+        color: "#fff",
+        fillColor: meta.color,
+        fillOpacity: 0.9,
+        weight: 1.5,
+      })
+        .bindTooltip(poi.name, { permanent: false, direction: "top", offset: [0, -6] })
+        .addTo(map);
+
+      poiMarkersRef.current.push(marker);
+    }
+  }, [pois]);
+
+  // ── GPS locate ──────────────────────────────────────────────────────────
   const handleLocateMe = () => {
     if (!navigator.geolocation) return;
     setLocating(true);
-
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const { latitude, longitude } = pos.coords;
-
         const map = mapInstanceRef.current;
         const L = (window as any).L;
-
         if (map) {
           map.flyTo([latitude, longitude], 15, { duration: 1.2 });
-
           if (userDotRef.current) userDotRef.current.remove();
           userDotRef.current = L.circleMarker([latitude, longitude], {
-            radius: 8,
-            color: "#fff",
-            fillColor: "#2563EB",
-            fillOpacity: 1,
-            weight: 3,
-          })
-            .bindPopup("You are here")
-            .addTo(map);
+            radius: 8, color: "#fff", fillColor: "#2563EB", fillOpacity: 1, weight: 3,
+          }).bindPopup("You are here").addTo(map);
         }
-
         try {
           const loc = await reverseGeocode(latitude, longitude);
           setOrigin(loc);
         } catch {
-          setOrigin({
-            id: `${latitude},${longitude}`,
-            name: "My Location",
-            displayName: "My Location",
-            latitude,
-            longitude,
-          });
+          setOrigin({ id: `${latitude},${longitude}`, name: "My Location", displayName: "My Location", latitude, longitude });
         } finally {
           setLocating(false);
         }
       },
-      () => {
-        setLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000 },
+      () => setLocating(false),
+      { enableHighAccuracy: true, timeout: 10_000 },
     );
   };
 
   return (
     <View style={styles.container}>
       <View nativeID={MAP_ID} style={styles.map} />
-
       <TouchableOpacity
         style={styles.locateButton}
         onPress={handleLocateMe}
         activeOpacity={0.85}
         disabled={locating}
       >
-        {locating ? (
-          <ActivityIndicator size="small" color="#1B6B3A" />
-        ) : (
-          <LocateIcon />
-        )}
+        {locating ? <ActivityIndicator size="small" color="#1B6B3A" /> : <LocateIcon />}
       </TouchableOpacity>
     </View>
   );
@@ -246,9 +223,7 @@ export default function MapContainer() {
 function LocateIcon() {
   return (
     <View style={styles.iconWrap}>
-      <View style={styles.iconOuter}>
-        <View style={styles.iconInner} />
-      </View>
+      <View style={styles.iconOuter}><View style={styles.iconInner} /></View>
       <View style={styles.iconCrosshairH} />
       <View style={styles.iconCrosshairV} />
     </View>
@@ -256,64 +231,21 @@ function LocateIcon() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  map: {
-    flex: 1,
-    width: "100%",
-    height: "100%",
-  } as any,
+  container: { ...StyleSheet.absoluteFillObject },
+  map: { flex: 1, width: "100%", height: "100%" } as any,
   locateButton: {
-    position: "absolute",
-    right: 14,
-    bottom: 130,
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    elevation: 5,
-    zIndex: 10,
+    position: "absolute", right: 14, bottom: 130,
+    width: 46, height: 46, borderRadius: 23,
+    backgroundColor: "#fff", alignItems: "center", justifyContent: "center",
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18, shadowRadius: 6, elevation: 5, zIndex: 10,
   },
-  iconWrap: {
-    width: 22,
-    height: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  iconWrap: { width: 22, height: 22, alignItems: "center", justifyContent: "center" },
   iconOuter: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 2,
-    borderColor: "#1B6B3A",
-    alignItems: "center",
-    justifyContent: "center",
+    width: 14, height: 14, borderRadius: 7,
+    borderWidth: 2, borderColor: "#1B6B3A", alignItems: "center", justifyContent: "center",
   },
-  iconInner: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: "#1B6B3A",
-  },
-  iconCrosshairH: {
-    position: "absolute",
-    width: 22,
-    height: 2,
-    backgroundColor: "#1B6B3A",
-    borderRadius: 1,
-  },
-  iconCrosshairV: {
-    position: "absolute",
-    width: 2,
-    height: 22,
-    backgroundColor: "#1B6B3A",
-    borderRadius: 1,
-  },
+  iconInner: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: "#1B6B3A" },
+  iconCrosshairH: { position: "absolute", width: 22, height: 2, backgroundColor: "#1B6B3A", borderRadius: 1 },
+  iconCrosshairV: { position: "absolute", width: 2, height: 22, backgroundColor: "#1B6B3A", borderRadius: 1 },
 });
