@@ -105,6 +105,27 @@ export default function BottomSheet() {
     if (origin) fetchPOIs(origin.latitude, origin.longitude);
   }, [origin, fetchPOIs]);
 
+  // Auto-snap to search sheet whenever either endpoint is set while sheet is peeked,
+  // so the user can see the loading state / Find Routes button / error messages.
+  useEffect(() => {
+    if ((origin || destination) && sheetStateRef.current === "peek") {
+      snapToRef.current("search");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [origin, destination]);
+
+  // Auto-search when both endpoints are set (deduplicated so we don't re-fire for
+  // the same pair if the component re-renders for unrelated reasons).
+  const autoSearchKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!origin || !destination) return;
+    const key = `${origin.latitude.toFixed(5)},${origin.longitude.toFixed(5)}|${destination.latitude.toFixed(5)},${destination.longitude.toFixed(5)}`;
+    if (autoSearchKeyRef.current === key) return;
+    autoSearchKeyRef.current = key;
+    searchRoutes();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [origin, destination]);
+
   const panResponder = useMemo(
     () =>
       PanResponder.create({

@@ -37,6 +37,13 @@ function gradeColor(grade: number): string {
   return "#DC2626";
 }
 
+/** Returns the Feather icon name for each route type. */
+function routeIcon(label: string): keyof typeof Feather.glyphMap {
+  if (label === "Fastest") return "zap";
+  if (label === "Flattest") return "minus";
+  return "award"; // "Best Route"
+}
+
 /** Fixed-size icon container that neutralises Feather's implicit font padding on web. */
 function Icon({
   name,
@@ -71,9 +78,10 @@ export default function RouteCard({ route, isSelected, onSelect }: Props) {
         },
       ]}
     >
-      {/* Header: label badge + selected checkmark */}
+      {/* Header: icon + label badge + selected checkmark */}
       <View style={styles.header}>
         <View style={[styles.badge, { backgroundColor: route.color }]}>
+          <Icon name={routeIcon(route.label)} size={12} color="#fff" />
           <Text style={styles.badgeText}>{route.label}</Text>
         </View>
         {isSelected && (
@@ -86,7 +94,7 @@ export default function RouteCard({ route, isSelected, onSelect }: Props) {
       {/* Stats row */}
       <View style={styles.stats}>
         <View style={styles.stat}>
-          <Icon name="map" size={14} color={colors.mutedForeground} />
+          <Icon name="map-pin" size={13} color={colors.mutedForeground} />
           <Text style={[styles.statValue, { color: colors.foreground }]}>
             {formatDistance(route.distance)}
           </Text>
@@ -95,7 +103,7 @@ export default function RouteCard({ route, isSelected, onSelect }: Props) {
         <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
         <View style={styles.stat}>
-          <Icon name="clock" size={14} color={colors.mutedForeground} />
+          <Icon name="clock" size={13} color={colors.mutedForeground} />
           <Text style={[styles.statValue, { color: colors.foreground }]}>
             {formatDuration(route.duration)}
           </Text>
@@ -105,7 +113,7 @@ export default function RouteCard({ route, isSelected, onSelect }: Props) {
           <>
             <View style={[styles.divider, { backgroundColor: colors.border }]} />
             <View style={styles.stat}>
-              <Icon name="trending-up" size={14} color={colors.mutedForeground} />
+              <Icon name="trending-up" size={13} color={colors.mutedForeground} />
               <Text style={[styles.statValue, { color: colors.foreground }]}>
                 +{elev.gain}m
               </Text>
@@ -147,9 +155,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   badge: {
-    borderRadius: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 8,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 5,
   },
   badgeText: {
     color: "#fff",
