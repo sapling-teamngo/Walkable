@@ -83,7 +83,7 @@ export async function getBatchElevation(
   routeDistances: number[],
 ): Promise<(ElevationData | null)[]> {
   const sampledArrays = routeCoords.map((coords) =>
-    sampleCoordinates(coords, Math.min(25, coords.length)),
+    sampleCoordinates(coords, Math.min(30, coords.length)),
   );
 
   const allPoints = sampledArrays.flat();

@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useState } from "react";
 import { GeoLocation } from "@/services/geocoding";
-import { getWalkingRoutes, RouteCoord } from "@/services/routing";
+import { getWalkingRoutes, RouteCoord, WALKING_MPS } from "@/services/routing";
 import { ElevationData, getBatchElevation } from "@/services/elevation";
 
 export interface WalkRoute {
@@ -29,6 +29,25 @@ interface RouteContextType {
 
 const RouteContext = createContext<RouteContextType | null>(null);
 
+/**
+ * Naismith's walking rule:
+ *   base time  = distance / walking speed (5 km/h)
+ *   climb time = 6 seconds per metre of ascent
+ *
+ * This gives realistic estimates like:
+ *   5 km flat   → ~60 min
+ *   5 km + 200m → ~82 min
+ */
+function naisimthDuration(distanceMeters: number, gainMeters: number): number {
+  return Math.round(distanceMeters / WALKING_MPS + gainMeters * 6);
+}
+
+/** Elevation gain for a candidate, defaulting to Infinity when unknown
+ *  so routes without data always sort after those with data. */
+function safeGain(elev: ElevationData | null): number {
+  return Number.isFinite(elev?.gain) ? elev!.gain : Infinity;
+}
+
 export function RouteProvider({ children }: { children: React.ReactNode }) {
   const [origin, setOrigin] = useState<GeoLocation | null>(null);
   const [destination, setDestination] = useState<GeoLocation | null>(null);
@@ -44,58 +63,78 @@ export function RouteProvider({ children }: { children: React.ReactNode }) {
     setRoutes([]);
 
     try {
+      // 1. Get up to 5 geometrically-distinct route candidates from OSRM
       const osrmRoutes = await getWalkingRoutes(
         { latitude: origin.latitude, longitude: origin.longitude },
         { latitude: destination.latitude, longitude: destination.longitude },
       );
 
+      // 2. Fetch elevation for all candidates in one batch request
       const elevations = await getBatchElevation(
         osrmRoutes.map((r) => r.coordinates),
         osrmRoutes.map((r) => r.distance),
       ).catch(() => osrmRoutes.map(() => null));
 
-      // When only 1 route: label it "Best Route" (flat id so map highlights green)
-      if (osrmRoutes.length === 1) {
-        const single: WalkRoute = {
-          id: "flat",
-          label: "Best Route",
-          color: "#1B6B3A",
-          coordinates: osrmRoutes[0].coordinates,
-          distance: osrmRoutes[0].distance,
-          duration: osrmRoutes[0].duration,
-          elevationData: elevations[0],
+      // 3. Build enriched candidates with Naismith-corrected durations
+      type Candidate = {
+        coordinates: RouteCoord[];
+        distance: number;
+        duration: number;
+        elevationData: ElevationData | null;
+      };
+
+      const candidates: Candidate[] = osrmRoutes.map((r, i) => {
+        const elev = elevations[i];
+        return {
+          coordinates: r.coordinates,
+          distance: r.distance,
+          duration: elev
+            ? naisimthDuration(r.distance, elev.gain)
+            : Math.round(r.distance / WALKING_MPS),
+          elevationData: elev,
         };
-        setRoutes([single]);
-        setSelectedRouteId("flat");
-        return;
-      }
+      });
 
-      // 2 routes: sort by elevation gain so the flatter one is always first
-      let walkRoutes: WalkRoute[] = osrmRoutes.slice(0, 2).map((r, i) => ({
-        id: i === 0 ? ("flat" as const) : ("fast" as const),
-        label: i === 0 ? "Flattest" : "Shortest",
-        color: i === 0 ? "#1B6B3A" : "#2563EB",
-        coordinates: r.coordinates,
-        distance: r.distance,
-        duration: r.duration,
-        elevationData: elevations[i],
-      }));
+      // 4. Pick the FLATTEST route: minimise elevation gain, within 1.5× the
+      //    shortest distance so the flattest path doesn't become absurdly long.
+      const shortestDist = Math.min(...candidates.map((c) => c.distance));
+      const eligible = candidates.filter(
+        (c) => c.distance <= shortestDist * 1.5,
+      );
+      const flattest = eligible.reduce((a, b) =>
+        safeGain(a.elevationData) <= safeGain(b.elevationData) ? a : b,
+      );
 
-      // If we have elevation data, re-sort so the lower-gain route = Flattest
-      const hasElev = elevations.some((e) => e !== null);
-      if (hasElev) {
-        // Use Number.isFinite to guard against NaN/null gain values so sort is always stable
-        const safeGain = (r: (typeof walkRoutes)[0]) =>
-          Number.isFinite(r.elevationData?.gain) ? r.elevationData!.gain : Infinity;
-        const sorted = [...walkRoutes].sort((a, b) => safeGain(a) - safeGain(b));
-        walkRoutes = [
-          { ...sorted[0], id: "flat", label: "Flattest", color: "#1B6B3A" },
-          { ...sorted[1], id: "fast", label: "Shortest", color: "#2563EB" },
-        ];
-      }
+      // 5. Pick the SHORTEST route: minimise total walking distance.
+      const shortest = candidates.reduce((a, b) =>
+        a.distance <= b.distance ? a : b,
+      );
 
-      setRoutes(walkRoutes);
-      setSelectedRouteId(walkRoutes[0].id);
+      // 6. Build the two WalkRoute objects.
+      //    If flattest === shortest (same candidate), both cards show it —
+      //    the user asked for this explicitly so they can compare metrics.
+      const flattestRoute: WalkRoute = {
+        id: "flat",
+        label: "Flattest",
+        color: "#1B6B3A",
+        coordinates: flattest.coordinates,
+        distance: flattest.distance,
+        duration: flattest.duration,
+        elevationData: flattest.elevationData,
+      };
+
+      const shortestRoute: WalkRoute = {
+        id: "fast",
+        label: "Shortest",
+        color: "#2563EB",
+        coordinates: shortest.coordinates,
+        distance: shortest.distance,
+        duration: shortest.duration,
+        elevationData: shortest.elevationData,
+      };
+
+      setRoutes([flattestRoute, shortestRoute]);
+      setSelectedRouteId("flat");
     } catch (e: any) {
       setError(e.message || "Could not find a route. Try different locations.");
     } finally {

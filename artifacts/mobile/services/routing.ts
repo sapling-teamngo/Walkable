@@ -5,12 +5,17 @@ export interface RouteCoord {
 
 export interface OsrmRoute {
   distance: number;
+  /** Walking duration in seconds — computed from distance, NOT from OSRM
+   *  (the public OSRM foot endpoint returns car-speed durations ~51 km/h). */
   duration: number;
   coordinates: RouteCoord[];
 }
 
 const OSRM_BASE = "https://router.project-osrm.org";
 const FETCH_TIMEOUT_MS = 8_000;
+
+/** True walking speed used everywhere duration is computed. */
+export const WALKING_MPS = 5000 / 3600; // 5 km/h ≈ 1.389 m/s
 
 function toCoordStr(p: RouteCoord) {
   return `${p.longitude},${p.latitude}`;
@@ -40,13 +45,19 @@ async function fetchOsrmRoutes(
       );
     }
 
-    return (data.routes as any[]).map((r: any) => ({
-      distance: r.distance as number,
-      duration: r.duration as number,
-      coordinates: (r.geometry.coordinates as [number, number][]).map(
-        ([lon, lat]) => ({ latitude: lat, longitude: lon }),
-      ),
-    }));
+    return (data.routes as any[]).map((r: any) => {
+      const distance = r.distance as number;
+      return {
+        distance,
+        // OSRM public server uses car speeds for the foot profile — compute
+        // the base walking duration ourselves; Naismith elevation adjustment
+        // is applied later in RouteContext once elevation data is available.
+        duration: Math.round(distance / WALKING_MPS),
+        coordinates: (r.geometry.coordinates as [number, number][]).map(
+          ([lon, lat]) => ({ latitude: lat, longitude: lon }),
+        ),
+      };
+    });
   } finally {
     clearTimeout(timer);
   }
@@ -54,8 +65,8 @@ async function fetchOsrmRoutes(
 
 /**
  * Returns a midpoint offset perpendicular to the origin→destination line.
- * Rotating the direction vector 90° and scaling by `factor` gives a corridor
- * that forces OSRM through a genuinely different part of the street network.
+ * Different factors explore different sides and distances from the direct path,
+ * increasing the chance of finding a genuinely flatter alternative.
  */
 function perpendicularMidpoint(
   o: RouteCoord,
@@ -72,7 +83,7 @@ function perpendicularMidpoint(
   };
 }
 
-/** True when two routes diverge enough to be worth showing separately (~50 m). */
+/** Two routes are meaningfully different if their midpoints are >~45 m apart. */
 function routesAreDifferent(a: OsrmRoute, b: OsrmRoute): boolean {
   const midA = a.coordinates[Math.floor(a.coordinates.length / 2)];
   const midB = b.coordinates[Math.floor(b.coordinates.length / 2)];
@@ -82,21 +93,40 @@ function routesAreDifferent(a: OsrmRoute, b: OsrmRoute): boolean {
   );
 }
 
+/**
+ * Returns up to 5 meaningfully-different walking route candidates.
+ *
+ * Strategy:
+ *  1. Ask OSRM for up to 3 built-in alternatives.
+ *  2. Fire 6 perpendicular via-point detours in parallel to probe the street
+ *     network on both sides and at three distance scales.
+ *  3. Accept detours that are ≤ 50 % longer than the direct route and are
+ *     geometrically distinct from every candidate already collected.
+ *
+ * The caller (RouteContext) then fetches elevation for all candidates and
+ * independently picks the flattest and the shortest.
+ */
 export async function getWalkingRoutes(
   origin: RouteCoord,
   destination: RouteCoord,
 ): Promise<OsrmRoute[]> {
-  // ── Step 1: ask OSRM for up to 3 built-in alternatives ───────────────────
+  // ── Step 1: built-in OSRM alternatives ──────────────────────────────────
   const primary = await fetchOsrmRoutes([origin, destination], true);
-  const uniquePrimary = primary.filter(
-    (r, i) => i === 0 || routesAreDifferent(primary[0], r),
-  );
-  if (uniquePrimary.length >= 2) return uniquePrimary.slice(0, 2);
+  if (primary.length === 0) throw new Error("No route found");
 
-  // ── Step 2: fire all 4 perpendicular via-point attempts in parallel ───────
-  // (sequential retries were too slow; parallel cuts wait time by ~75 %)
-  const factors = [0.005, -0.005, 0.01, -0.01];
-  const directDist = primary[0]?.distance ?? Infinity;
+  const candidates: OsrmRoute[] = [primary[0]];
+  for (let i = 1; i < primary.length; i++) {
+    if (routesAreDifferent(candidates[0], primary[i])) {
+      candidates.push(primary[i]);
+    }
+  }
+
+  if (candidates.length >= 4) return candidates.slice(0, 4);
+
+  // ── Step 2: perpendicular via-point probes (parallel) ────────────────────
+  // Six factors: two distances (medium/large) on each of three sides
+  const factors = [0.004, -0.004, 0.008, -0.008, 0.013, -0.013];
+  const directDist = primary[0].distance;
 
   const attempts = await Promise.allSettled(
     factors.map((f) => {
@@ -106,17 +136,17 @@ export async function getWalkingRoutes(
   );
 
   for (const result of attempts) {
-    if (result.status !== "fulfilled" || result.value.length === 0) continue;
-    const candidate = result.value[0];
-    // Accept if ≤ 60 % longer than direct and genuinely different
+    if (result.status !== "fulfilled" || !result.value.length) continue;
+    const c = result.value[0];
+    // Accept if ≤ 50 % longer than direct and distinct from all collected
     if (
-      candidate.distance <= directDist * 1.6 &&
-      (!primary[0] || routesAreDifferent(primary[0], candidate))
+      c.distance <= directDist * 1.5 &&
+      candidates.every((existing) => routesAreDifferent(existing, c))
     ) {
-      return [primary[0], candidate].filter(Boolean);
+      candidates.push(c);
+      if (candidates.length >= 5) break;
     }
   }
 
-  // ── Step 3: graceful single-route fallback ────────────────────────────────
-  return primary.slice(0, 1);
+  return candidates;
 }
