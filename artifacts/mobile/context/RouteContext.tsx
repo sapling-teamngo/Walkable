@@ -73,7 +73,7 @@ export function RouteProvider({ children }: { children: React.ReactNode }) {
       // 2 routes: sort by elevation gain so the flatter one is always first
       let walkRoutes: WalkRoute[] = osrmRoutes.slice(0, 2).map((r, i) => ({
         id: i === 0 ? ("flat" as const) : ("fast" as const),
-        label: i === 0 ? "Flattest" : "Fastest",
+        label: i === 0 ? "Flattest" : "Shortest",
         color: i === 0 ? "#1B6B3A" : "#2563EB",
         coordinates: r.coordinates,
         distance: r.distance,
@@ -90,7 +90,7 @@ export function RouteProvider({ children }: { children: React.ReactNode }) {
         const sorted = [...walkRoutes].sort((a, b) => safeGain(a) - safeGain(b));
         walkRoutes = [
           { ...sorted[0], id: "flat", label: "Flattest", color: "#1B6B3A" },
-          { ...sorted[1], id: "fast", label: "Fastest", color: "#2563EB" },
+          { ...sorted[1], id: "fast", label: "Shortest", color: "#2563EB" },
         ];
       }
 

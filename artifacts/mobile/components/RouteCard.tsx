@@ -37,23 +37,14 @@ function gradeColor(grade: number): string {
   return "#DC2626";
 }
 
-/** Returns the Feather icon name for each route type. */
 function routeIcon(label: string): keyof typeof Feather.glyphMap {
-  if (label === "Fastest") return "zap";
+  if (label === "Shortest") return "scissors";
   if (label === "Flattest") return "minus";
-  return "award"; // "Best Route"
+  return "award";
 }
 
-/** Fixed-size icon container that neutralises Feather's implicit font padding on web. */
-function Icon({
-  name,
-  size,
-  color,
-}: {
-  name: keyof typeof Feather.glyphMap;
-  size: number;
-  color: string;
-}) {
+/** Fixed-size icon box that kills Feather's implicit font-padding on web. */
+function Icon({ name, size, color }: { name: keyof typeof Feather.glyphMap; size: number; color: string }) {
   return (
     <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
       <Feather name={name} size={size} color={color} />
@@ -78,20 +69,20 @@ export default function RouteCard({ route, isSelected, onSelect }: Props) {
         },
       ]}
     >
-      {/* Header: icon + label badge + selected checkmark */}
+      {/* ── Header: icon + label badge + selected tick ─────────────────── */}
       <View style={styles.header}>
         <View style={[styles.badge, { backgroundColor: route.color }]}>
-          <Icon name={routeIcon(route.label)} size={12} color="#fff" />
+          <Icon name={routeIcon(route.label)} size={11} color="#fff" />
           <Text style={styles.badgeText}>{route.label}</Text>
         </View>
         {isSelected && (
           <View style={[styles.selectedDot, { backgroundColor: route.color }]}>
-            <Icon name="check" size={12} color="#fff" />
+            <Icon name="check" size={11} color="#fff" />
           </View>
         )}
       </View>
 
-      {/* Stats row */}
+      {/* ── Stats: distance | time (always fits in half-width card) ─────── */}
       <View style={styles.stats}>
         <View style={styles.stat}>
           <Icon name="map-pin" size={13} color={colors.mutedForeground} />
@@ -108,35 +99,24 @@ export default function RouteCard({ route, isSelected, onSelect }: Props) {
             {formatDuration(route.duration)}
           </Text>
         </View>
-
-        {elev && (
-          <>
-            <View style={[styles.divider, { backgroundColor: colors.border }]} />
-            <View style={styles.stat}>
-              <Icon name="trending-up" size={13} color={colors.mutedForeground} />
-              <Text style={[styles.statValue, { color: colors.foreground }]}>
-                +{elev.gain}m
-              </Text>
-            </View>
-          </>
-        )}
       </View>
 
-      {/* Grade pill */}
-      {elev && (
+      {/* ── Grade pill (includes elevation gain to avoid row overflow) ─── */}
+      {elev ? (
         <View style={styles.gradeRow}>
-          <View
-            style={[
-              styles.gradePill,
-              { backgroundColor: gradeColor(elev.maxGrade) + "18" },
-            ]}
-          >
+          <View style={[styles.gradePill, { backgroundColor: gradeColor(elev.maxGrade) + "18" }]}>
             <View style={[styles.gradeDot, { backgroundColor: gradeColor(elev.maxGrade) }]} />
             <Text style={[styles.gradeText, { color: gradeColor(elev.maxGrade) }]}>
-              {gradeLabel(elev.maxGrade)} · max {elev.maxGrade}% grade
+              {gradeLabel(elev.maxGrade)}
+            </Text>
+            <Text style={[styles.gradeText, { color: gradeColor(elev.maxGrade), opacity: 0.7 }]}>
+              · ↑{elev.gain}m · {elev.maxGrade}%
             </Text>
           </View>
         </View>
+      ) : (
+        /* Placeholder keeps both cards the same height even without elevation data */
+        <View style={styles.gradePlaceholder} />
       )}
     </TouchableOpacity>
   );
@@ -180,7 +160,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    flexWrap: "nowrap",
   },
   stat: {
     flexDirection: "row",
@@ -202,19 +181,25 @@ const styles = StyleSheet.create({
   gradePill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 4,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 20,
+    flexShrink: 1,
   },
   gradeDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
+    flexShrink: 0,
   },
   gradeText: {
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: "Inter_500Medium",
     includeFontPadding: false,
+    flexShrink: 1,
   } as any,
+  gradePlaceholder: {
+    height: 24,
+  },
 });
