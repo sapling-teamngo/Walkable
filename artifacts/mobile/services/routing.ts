@@ -3,12 +3,19 @@ export interface RouteCoord {
   longitude: number;
 }
 
+export interface RouteStep {
+  instruction: string;
+  distance: number; // metres
+  icon: string; // Feather icon name
+}
+
 export interface OsrmRoute {
   distance: number;
   /** Walking duration in seconds — computed from distance, NOT from OSRM
    *  (the public OSRM foot endpoint returns car-speed durations ~51 km/h). */
   duration: number;
   coordinates: RouteCoord[];
+  steps: RouteStep[];
 }
 
 const OSRM_BASE = "https://router.project-osrm.org";
@@ -20,6 +27,91 @@ export const WALKING_MPS = 5000 / 3600; // 5 km/h ≈ 1.389 m/s
 function toCoordStr(p: RouteCoord) {
   return `${p.longitude},${p.latitude}`;
 }
+
+// ── Step parsing ──────────────────────────────────────────────────────────────
+
+function parseOsrmStep(step: any): RouteStep {
+  const maneuver = step.maneuver ?? {};
+  const type: string = maneuver.type ?? "";
+  const modifier: string = maneuver.modifier ?? "";
+  const name: string = step.name ?? "";
+  const distance = Math.round(step.distance ?? 0);
+
+  let instruction: string;
+  let icon = "arrow-up";
+
+  if (type === "depart") {
+    instruction = name ? `Head towards ${name}` : "Depart";
+    icon = "navigation";
+  } else if (type === "arrive") {
+    instruction = "Arrive at destination";
+    icon = "map-pin";
+  } else if (type === "turn" || type === "end of road") {
+    if (modifier === "sharp left" || modifier === "left") {
+      instruction = name ? `Turn left onto ${name}` : "Turn left";
+      icon = "corner-up-left";
+    } else if (modifier === "sharp right" || modifier === "right") {
+      instruction = name ? `Turn right onto ${name}` : "Turn right";
+      icon = "corner-up-right";
+    } else if (modifier === "slight left") {
+      instruction = name ? `Bear left onto ${name}` : "Bear left";
+      icon = "corner-up-left";
+    } else if (modifier === "slight right") {
+      instruction = name ? `Bear right onto ${name}` : "Bear right";
+      icon = "corner-up-right";
+    } else if (modifier === "uturn") {
+      instruction = "Make a U-turn";
+      icon = "repeat";
+    } else {
+      instruction = name ? `Continue onto ${name}` : "Continue straight";
+      icon = "arrow-up";
+    }
+  } else if (type === "continue" || type === "new name") {
+    instruction = name ? `Continue on ${name}` : "Continue straight";
+    icon = "arrow-up";
+  } else if (type === "merge") {
+    instruction = name ? `Merge onto ${name}` : "Merge";
+    icon = "git-merge";
+  } else if (type === "roundabout" || type === "rotary") {
+    const exit = maneuver.exit ? ` (exit ${maneuver.exit})` : "";
+    instruction = name ? `Take the roundabout onto ${name}${exit}` : `Take the roundabout${exit}`;
+    icon = "refresh-cw";
+  } else if (type === "fork") {
+    if (modifier?.includes("left")) {
+      instruction = name ? `Keep left onto ${name}` : "Keep left";
+      icon = "corner-up-left";
+    } else {
+      instruction = name ? `Keep right onto ${name}` : "Keep right";
+      icon = "corner-up-right";
+    }
+  } else {
+    instruction = name ? `Continue on ${name}` : "Continue";
+    icon = "arrow-up";
+  }
+
+  return { instruction, distance, icon };
+}
+
+function extractSteps(legs: any[]): RouteStep[] {
+  const raw: any[] = [];
+
+  for (let legIdx = 0; legIdx < legs.length; legIdx++) {
+    const legSteps: any[] = legs[legIdx]?.steps ?? [];
+    for (const step of legSteps) {
+      const mType = step.maneuver?.type ?? "";
+      // Skip intermediate arrive/depart at via-points (only keep first depart + last arrive)
+      if (mType === "arrive" && legIdx < legs.length - 1) continue;
+      if (mType === "depart" && legIdx > 0) continue;
+      // Skip very short steps (< 10m) except depart/arrive
+      if (step.distance < 10 && mType !== "depart" && mType !== "arrive") continue;
+      raw.push(step);
+    }
+  }
+
+  return raw.map(parseOsrmStep);
+}
+
+// ── Core fetch ────────────────────────────────────────────────────────────────
 
 async function fetchOsrmRoutes(
   waypoints: RouteCoord[],
@@ -33,7 +125,7 @@ async function fetchOsrmRoutes(
     const altParam = alternatives ? "&alternatives=3" : "";
     const url =
       `${OSRM_BASE}/route/v1/foot/${coordStr}` +
-      `?overview=full&geometries=geojson${altParam}`;
+      `?overview=full&geometries=geojson&steps=true${altParam}`;
 
     const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) throw new Error("Routing service unavailable");
@@ -47,15 +139,14 @@ async function fetchOsrmRoutes(
 
     return (data.routes as any[]).map((r: any) => {
       const distance = r.distance as number;
+      const legs: any[] = r.legs ?? [];
       return {
         distance,
-        // OSRM public server uses car speeds for the foot profile — compute
-        // the base walking duration ourselves; Naismith elevation adjustment
-        // is applied later in RouteContext once elevation data is available.
         duration: Math.round(distance / WALKING_MPS),
         coordinates: (r.geometry.coordinates as [number, number][]).map(
           ([lon, lat]) => ({ latitude: lat, longitude: lon }),
         ),
+        steps: extractSteps(legs),
       };
     });
   } finally {
@@ -63,10 +154,10 @@ async function fetchOsrmRoutes(
   }
 }
 
+// ── Geometry helpers ──────────────────────────────────────────────────────────
+
 /**
  * Returns a midpoint offset perpendicular to the origin→destination line.
- * Different factors explore different sides and distances from the direct path,
- * increasing the chance of finding a genuinely flatter alternative.
  */
 function perpendicularMidpoint(
   o: RouteCoord,
@@ -93,6 +184,8 @@ function routesAreDifferent(a: OsrmRoute, b: OsrmRoute): boolean {
   );
 }
 
+// ── Public API ────────────────────────────────────────────────────────────────
+
 /**
  * Returns up to 5 meaningfully-different walking route candidates.
  *
@@ -102,9 +195,6 @@ function routesAreDifferent(a: OsrmRoute, b: OsrmRoute): boolean {
  *     network on both sides and at three distance scales.
  *  3. Accept detours that are ≤ 50 % longer than the direct route and are
  *     geometrically distinct from every candidate already collected.
- *
- * The caller (RouteContext) then fetches elevation for all candidates and
- * independently picks the flattest and the shortest.
  */
 export async function getWalkingRoutes(
   origin: RouteCoord,
@@ -124,7 +214,6 @@ export async function getWalkingRoutes(
   if (candidates.length >= 4) return candidates.slice(0, 4);
 
   // ── Step 2: perpendicular via-point probes (parallel) ────────────────────
-  // Six factors: two distances (medium/large) on each of three sides
   const factors = [0.004, -0.004, 0.008, -0.008, 0.013, -0.013];
   const directDist = primary[0].distance;
 
@@ -138,7 +227,6 @@ export async function getWalkingRoutes(
   for (const result of attempts) {
     if (result.status !== "fulfilled" || !result.value.length) continue;
     const c = result.value[0];
-    // Accept if ≤ 50 % longer than direct and distinct from all collected
     if (
       c.distance <= directDist * 1.5 &&
       candidates.every((existing) => routesAreDifferent(existing, c))

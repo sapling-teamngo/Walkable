@@ -20,6 +20,7 @@ function formatDuration(seconds: number): string {
   if (mins < 60) return `${mins} min`;
   const h = Math.floor(mins / 60);
   const m = mins % 60;
+  if (m === 0) return `${h}h`;
   return `${h}h ${m}m`;
 }
 
@@ -43,8 +44,55 @@ function routeIcon(label: string): keyof typeof Feather.glyphMap {
   return "award";
 }
 
+interface DifficultyResult {
+  stars: number;
+  label: string;
+  color: string;
+}
+
+function difficultyScore(
+  distM: number,
+  gain: number,
+  maxGrade: number,
+): DifficultyResult {
+  const gainPerKm = gain / Math.max(distM / 1000, 0.1);
+  const distKm = distM / 1000;
+
+  let raw = 0;
+
+  // Distance contribution
+  if (distKm > 12) raw += 2;
+  else if (distKm > 8) raw += 1.5;
+  else if (distKm > 4) raw += 1;
+  else if (distKm > 1.5) raw += 0.5;
+
+  // Elevation gain per km — primary difficulty driver for a walking app
+  if (gainPerKm > 40) raw += 3;
+  else if (gainPerKm > 25) raw += 2;
+  else if (gainPerKm > 15) raw += 1.5;
+  else if (gainPerKm > 8) raw += 1;
+  else if (gainPerKm > 3) raw += 0.5;
+
+  // Max grade (steepest section)
+  if (maxGrade > 20) raw += 1;
+  else if (maxGrade > 12) raw += 0.5;
+
+  const stars = Math.min(5, Math.max(1, Math.round(raw + 1)));
+  const labels = ["Very Easy", "Easy", "Moderate", "Hard", "Very Hard"];
+  const diffColors = ["#16A34A", "#65A30D", "#CA8A04", "#EA580C", "#DC2626"];
+  return { stars, label: labels[stars - 1], color: diffColors[stars - 1] };
+}
+
 /** Fixed-size icon box that kills Feather's implicit font-padding on web. */
-function Icon({ name, size, color }: { name: keyof typeof Feather.glyphMap; size: number; color: string }) {
+function Icon({
+  name,
+  size,
+  color,
+}: {
+  name: keyof typeof Feather.glyphMap;
+  size: number;
+  color: string;
+}) {
   return (
     <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
       <Feather name={name} size={size} color={color} />
@@ -55,6 +103,7 @@ function Icon({ name, size, color }: { name: keyof typeof Feather.glyphMap; size
 export default function RouteCard({ route, isSelected, onSelect }: Props) {
   const colors = useColors();
   const elev = route.elevationData;
+  const diff = elev ? difficultyScore(route.distance, elev.gain, elev.maxGrade) : null;
 
   return (
     <TouchableOpacity
@@ -82,7 +131,7 @@ export default function RouteCard({ route, isSelected, onSelect }: Props) {
         )}
       </View>
 
-      {/* ── Stats: distance | time (always fits in half-width card) ─────── */}
+      {/* ── Stats: distance | time ───────────────────────────────────────── */}
       <View style={styles.stats}>
         <View style={styles.stat}>
           <Icon name="map-pin" size={13} color={colors.mutedForeground} />
@@ -101,7 +150,7 @@ export default function RouteCard({ route, isSelected, onSelect }: Props) {
         </View>
       </View>
 
-      {/* ── Grade pill (includes elevation gain to avoid row overflow) ─── */}
+      {/* ── Grade pill (includes elevation gain) ────────────────────────── */}
       {elev ? (
         <View style={styles.gradeRow}>
           <View style={[styles.gradePill, { backgroundColor: gradeColor(elev.maxGrade) + "18" }]}>
@@ -115,8 +164,32 @@ export default function RouteCard({ route, isSelected, onSelect }: Props) {
           </View>
         </View>
       ) : (
-        /* Placeholder keeps both cards the same height even without elevation data */
         <View style={styles.gradePlaceholder} />
+      )}
+
+      {/* ── Difficulty score ─────────────────────────────────────────────── */}
+      {diff ? (
+        <View style={styles.diffRow}>
+          <View style={styles.diffDots}>
+            {[1, 2, 3, 4, 5].map((i) => (
+              <View
+                key={i}
+                style={[
+                  styles.diffDot,
+                  {
+                    backgroundColor:
+                      i <= diff.stars ? diff.color : colors.border,
+                  },
+                ]}
+              />
+            ))}
+          </View>
+          <Text style={[styles.diffLabel, { color: diff.color }]}>
+            {diff.label}
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.diffPlaceholder} />
       )}
     </TouchableOpacity>
   );
@@ -201,5 +274,27 @@ const styles = StyleSheet.create({
   } as any,
   gradePlaceholder: {
     height: 24,
+  },
+  diffRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  diffDots: {
+    flexDirection: "row",
+    gap: 3,
+  },
+  diffDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+  },
+  diffLabel: {
+    fontSize: 10,
+    fontFamily: "Inter_500Medium",
+    includeFontPadding: false,
+  } as any,
+  diffPlaceholder: {
+    height: 14,
   },
 });

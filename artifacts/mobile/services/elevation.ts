@@ -5,7 +5,12 @@ export interface ElevationData {
   maxGrade: number;
 }
 
-const OPEN_ELEVATION_URL = "https://api.open-elevation.com/api/v1/lookup";
+// Open-Topo-Data: free, more reliable than Open-Elevation, SRTM 30m resolution.
+// Batch limit: 100 locations per request. We cap each route at 20 samples so
+// 5 routes × 20 = 100 points fit in one request.
+const OPENTOPODATA_URL = "https://api.opentopodata.org/v1/srtm30m";
+const ELEVATION_TIMEOUT_MS = 12_000;
+const MAX_SAMPLES_PER_ROUTE = 20;
 
 function sampleCoordinates<T extends { latitude: number; longitude: number }>(
   coords: T[],
@@ -44,46 +49,59 @@ function computeElevationStats(
 async function fetchElevations(
   locations: { latitude: number; longitude: number }[],
 ): Promise<number[]> {
-  const body = {
-    locations: locations.map((l) => ({
-      latitude: l.latitude,
-      longitude: l.longitude,
-    })),
-  };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ELEVATION_TIMEOUT_MS);
 
-  const response = await fetch(OPEN_ELEVATION_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(body),
-  });
+  try {
+    const response = await fetch(OPENTOPODATA_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        locations: locations.map((l) => ({
+          latitude: l.latitude,
+          longitude: l.longitude,
+        })),
+      }),
+      signal: controller.signal,
+    });
 
-  if (!response.ok) throw new Error(`Open-Elevation error: ${response.status}`);
+    if (!response.ok) throw new Error(`Open-Topo-Data error: ${response.status}`);
 
-  const data = (await response.json()) as { results: { elevation: number }[] };
-  if (!data.results?.length) throw new Error("No elevation results returned");
+    const data = (await response.json()) as {
+      status: string;
+      results: { elevation: number }[];
+    };
 
-  return data.results.map((r) => r.elevation);
+    if (data.status !== "OK" || !data.results?.length) {
+      throw new Error("No elevation results returned");
+    }
+
+    return data.results.map((r) => r.elevation ?? 0);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function getRouteElevation(
   coords: { latitude: number; longitude: number }[],
   totalDistanceMeters: number,
 ): Promise<ElevationData> {
-  const sampled = sampleCoordinates(coords, Math.min(25, coords.length));
+  const sampled = sampleCoordinates(coords, Math.min(MAX_SAMPLES_PER_ROUTE, coords.length));
   const elevations = await fetchElevations(sampled);
   return computeElevationStats(elevations, totalDistanceMeters);
 }
 
 /**
- * Fetch elevation for multiple routes in a single POST request so we avoid
- * any per-request rate limits.
+ * Fetch elevation for multiple routes in a single POST request.
+ * Open-Topo-Data allows max 100 locations/request; with MAX_SAMPLES_PER_ROUTE=20
+ * this handles up to 5 routes per call without chunking.
  */
 export async function getBatchElevation(
   routeCoords: { latitude: number; longitude: number }[][],
   routeDistances: number[],
 ): Promise<(ElevationData | null)[]> {
   const sampledArrays = routeCoords.map((coords) =>
-    sampleCoordinates(coords, Math.min(30, coords.length)),
+    sampleCoordinates(coords, Math.min(MAX_SAMPLES_PER_ROUTE, coords.length)),
   );
 
   const allPoints = sampledArrays.flat();

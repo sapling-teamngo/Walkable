@@ -120,6 +120,8 @@ export function formatDistance(metres: number): string {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+const OVERPASS_TIMEOUT_MS = 15_000;
+
 export async function fetchNearbyPOIs(
   lat: number,
   lon: number,
@@ -128,11 +130,20 @@ export async function fetchNearbyPOIs(
 ): Promise<POI[]> {
   const body = buildQuery(lat, lon, radiusM, limit);
 
-  const res = await fetch(OVERPASS_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `data=${encodeURIComponent(body)}`,
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(OVERPASS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `data=${encodeURIComponent(body)}`,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) throw new Error("Overpass API error");
 

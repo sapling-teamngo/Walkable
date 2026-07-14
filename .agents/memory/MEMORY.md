@@ -1,0 +1,1 @@
+- [Walkable app architecture](walkable-arch.md) — key stack decisions: OSRM routing, Open-Topo-Data elevation, Naismith duration, ThemeContext dark mode, AsyncStorage saved routes.

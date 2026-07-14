@@ -39,6 +39,7 @@ export default function SearchInput({
 
   useEffect(() => {
     setQuery(value);
+    setSuggestions([]); // Bug fix: clear stale suggestions when value is set externally
   }, [value]);
 
   const handleChange = useCallback((text: string) => {

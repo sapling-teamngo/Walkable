@@ -4,6 +4,7 @@ import BottomSheet from "@/components/BottomSheet";
 import MapContainer from "@/components/MapContainer";
 import { POIProvider } from "@/context/POIContext";
 import { RouteProvider } from "@/context/RouteContext";
+import { ThemeProvider } from "@/context/ThemeContext";
 
 function MapScreen() {
   return (
@@ -16,11 +17,13 @@ function MapScreen() {
 
 export default function IndexScreen() {
   return (
-    <RouteProvider>
-      <POIProvider>
-        <MapScreen />
-      </POIProvider>
-    </RouteProvider>
+    <ThemeProvider>
+      <RouteProvider>
+        <POIProvider>
+          <MapScreen />
+        </POIProvider>
+      </RouteProvider>
+    </ThemeProvider>
   );
 }
 
