@@ -1,8 +1,13 @@
 uploads = []
-outputs = []
 
 [[generated]]
 id = "ealB-m1Et81oHPxNITxGm"
 uri = "file://artifacts/mobile/assets/images/icon.png"
 type = "image"
 title = "walkable app icon"
+
+[[outputs]]
+id = "f87vf8e1TJUVrOjERcXMH"
+uri = "file://artifacts/walkable-video/public/audio/bg_music.mp3"
+type = "audio"
+title = "background music"

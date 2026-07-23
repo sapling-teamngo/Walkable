@@ -1,0 +1,27 @@
+kind = "video"
+previewPath = "/walkable-video/"
+title = "Walkable — App Promo Video"
+version = "1.0.0"
+id = "artifacts/walkable-video"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/walkable-video/" ]
+localPort = 18855
+
+[services.development]
+run = "pnpm --filter @workspace/walkable-video run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/walkable-video", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/walkable-video/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18855"
+BASE_PATH = "/walkable-video/"
